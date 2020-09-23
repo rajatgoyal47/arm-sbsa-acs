@@ -310,9 +310,8 @@ val_pcie_execute_tests(uint32_t enable_pcie, uint32_t level, uint32_t num_pe)
     status |= p019_entry(num_pe);
   }
 #else
-  /* Create the list of valid Pcie Device Functions */
-  if (val_pcie_create_device_bdf_table())
-      return AVS_STATUS_SKIP;
+  if (g_pcie_bdf_table->num_entries == 0)
+    return AVS_STATUS_SKIP;
 
   if (enable_pcie) {
     status |= p020_entry(num_pe);
@@ -363,6 +362,44 @@ val_pcie_execute_tests(uint32_t enable_pcie, uint32_t level, uint32_t num_pe)
   return status;
 }
 
+void
+val_pcie_print_device_info(void)
+{
+  uint32_t bdf;
+  uint32_t dp_type;
+  uint32_t tbl_index;
+  pcie_device_bdf_table *bdf_tbl_ptr;
+  uint32_t num_rciep = 0, num_rcec = 0;
+  uint32_t num_iep = 0, num_irp = 0;;
+
+  bdf_tbl_ptr = val_pcie_bdf_table_ptr();
+  tbl_index = 0;
+
+  if (bdf_tbl_ptr->num_entries == 0)
+  {
+    val_print(AVS_PRINT_ERR, " PCIE_INFO: BDF Table : No Devices Found\n", 0);
+    return;
+  }
+
+  for (tbl_index = 0; tbl_index < bdf_tbl_ptr->num_entries; tbl_index++)
+  {
+      bdf = bdf_tbl_ptr->device[tbl_index].bdf;
+      dp_type = val_pcie_device_port_type(bdf);
+
+      switch (dp_type)
+      {
+        case RCiEP  : num_rciep++; break;
+        case RCEC   : num_rcec++; break;
+        case iEP_EP : num_iep++; break;
+        case iEP_RP : num_irp++; break;
+      }
+  }
+
+  val_print(AVS_PRINT_TEST, " PCIE_INFO: Number of RCiEP           :    %lx \n", num_rciep);
+  val_print(AVS_PRINT_TEST, " PCIE_INFO: Number of RCEC            :    %lx \n", num_rcec);
+  val_print(AVS_PRINT_TEST, " PCIE_INFO: Number of iEP             :    %lx \n", num_iep);
+  val_print(AVS_PRINT_TEST, " PCIE_INFO: Number of iEP RP          :    %lx \n", num_irp);
+}
 
 /**
   @brief   This API will call PAL layer to fill in the PCIe information
@@ -387,6 +424,14 @@ val_pcie_create_info_table(uint64_t *pcie_info_table)
   pal_pcie_create_info_table(g_pcie_info_table);
 
   val_print(AVS_PRINT_TEST, " PCIE_INFO: Number of ECAM regions    :    %lx \n", val_pcie_get_info(PCIE_INFO_NUM_ECAM, 0));
+
+  /* Create the list of valid Pcie Device Functions */
+  if (val_pcie_create_device_bdf_table()) {
+      val_print(AVS_PRINT_ERR, "Create Bdf table failed.\n", 0);
+      return;
+  }
+
+  val_pcie_print_device_info();
 
   val_pcie_enumerate();
 }
@@ -1815,7 +1860,7 @@ val_pcie_parent_is_rootport(uint32_t dsf_bdf, uint32_t *rp_bdf)
       /* Check if this table entry is a Root Port */
       if (dp_type == RP)
       {
-         /* Check if exerciser is a direct child of this root port */
+         /* Check if device is a direct child of this root port */
           val_pcie_read_cfg(bdf, TYPE1_PBN, &reg_value);
           if ((dsf_bus == ((reg_value >> SECBN_SHIFT) & SECBN_MASK)) &&
               (dsf_bus <= ((reg_value >> SUBBN_SHIFT) & SUBBN_MASK)))
